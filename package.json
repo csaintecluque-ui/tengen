@@ -1,0 +1,27 @@
+{
+  "name": "tengen",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Tengen \u2014 apprendre et jouer au go, avec KataGo embarqu\u00e9",
+  "scripts": {
+    "dev": "node scripts/copy-ort.mjs && vite",
+    "build": "node scripts/copy-ort.mjs && tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "trees": "vite-node scripts/build-trees.ts"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.1",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "vite-plugin-pwa": "^1.0.0",
+    "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "@fontsource/atkinson-hyperlegible": "^5.3.0",
+    "@fontsource/shippori-mincho-b1": "^5.3.0",
+    "onnxruntime-web": "^1.22.0",
+    "preact": "^10.26.9"
+  }
+}
