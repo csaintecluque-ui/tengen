@@ -6,7 +6,7 @@ import type { SearchResult } from "../katago/search";
 import type { McResult } from "./mcts";
 
 export type KataState = { status: "absent" } | { status: "loading"; progress: number; phase?: string } | { status: "ready" } | { status: "error"; message: string };
-export interface ReviewPoint { winrateBlack: number; leadBlack: number; best: number[]; policy: number; }
+import type { ReviewPos } from "../store";
 
 const BASE = import.meta.env.BASE_URL;
 export const MODEL_URL = BASE + "models/kata-b15c192.onnx";
@@ -58,7 +58,8 @@ class EngineClient {
   deadStones(g: Game) { return this.call<number[]>({ type: "dead", game: toData(g) }); }
   ownership(g: Game) { return this.call<Float32Array>({ type: "ownership", game: toData(g) }); }
   mc(g: Game, timeMs: number) { return this.call<McResult>({ type: "mc", game: toData(g), timeMs }); }
-  review(g: Game, prog: (p: number) => void) { return this.call<ReviewPoint[] | null>({ type: "review", game: toData(g) }, prog); }
+  cancelReview() { this.w.postMessage({ type: "cancel", id: ++this.seq }); }
+  review(g: Game, visits: number, prog: (p: number) => void) { return this.call<ReviewPos[] | null>({ type: "review", game: toData(g), visits }, prog); }
 }
 
 export const engine = new EngineClient();

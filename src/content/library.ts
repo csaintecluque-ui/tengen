@@ -48,7 +48,7 @@ export const ARTICLES: Article[] = [
     { list: [
       "**Un peu de problèmes chaque jour** : 10 minutes de tsumego valent mieux qu'une heure par semaine. Les révisions de Tengen sont faites pour ça.",
       "**Beaucoup de petites parties** : le 9×9 entraîne la lecture et la fin de partie. Passe au 13×13 puis au 19×19 quand tu gagnes régulièrement.",
-      "**Analyse tes défaites** : regarde le moment où la courbe de KataGo chute, et demande à Claude d'expliquer.",
+      "**Analyse tes défaites** : regarde le moment où la courbe de KataGo chute, et demande à ton professeur IA d'expliquer.",
       "**Joue contre plus fort** : on progresse en perdant contre de meilleurs joueurs, avec handicap si besoin.",
       "**Ne t'attache pas aux pierres** : sacrifier deux pierres pour prendre l'initiative est souvent le meilleur choix."
     ]}
@@ -72,7 +72,7 @@ export const ARTICLES: Article[] = [
       "1. Suis le module **Les règles**, puis joue tout de suite contre le niveau Débutant en 9×9.",
       "2. Avance dans le parcours une ou deux leçons à la fois, en alternant avec des problèmes.",
       "3. Après chaque partie, ouvre l'**analyse** : KataGo montre les moments où la partie a basculé.",
-      "4. Avec une clé API, pose tes questions à **Claude**, ton professeur : « pourquoi ce coup est-il mauvais ? »",
+      "4. Avec une clé API, pose tes questions à ton **professeur IA** (Claude, ChatGPT, Gemini…) : « pourquoi ce coup est-il mauvais ? »",
       "5. Quand tu bats le niveau Novice, inscris-toi sur OGS pour tes premières parties contre des humains."
     ]}
   ]}

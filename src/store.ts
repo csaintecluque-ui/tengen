@@ -11,17 +11,12 @@ export interface Settings {
   theme: "system" | "light" | "dark";
   confirmTap: boolean;
   coords: boolean;
-  apiKey: string;
-  claudeModel: string;
+  ai: { provider: "anthropic" | "openai" | "google" | "xai" | "openrouter" | "custom"; keys: Record<string, string>; models: Record<string, string>; customBase: string };
+  analysisDepth: "rapide" | "standard" | "approfondie";
   autoKatago: boolean;
   showMoveNumbers: boolean;
 }
-export const CLAUDE_MODELS = [
-  { id: "claude-haiku-5-5", name: "Haiku 5.5", desc: "Rapide et économique" },
-  { id: "claude-sonnet-5-5", name: "Sonnet 5.5", desc: "Le meilleur équilibre (recommandé)" },
-  { id: "claude-opus-5-5", name: "Opus 5.5", desc: "Le plus fin, plus cher" }
-];
-const defaultSettings: Settings = { theme: "system", confirmTap: true, coords: true, apiKey: "", claudeModel: "claude-sonnet-5-5", autoKatago: true, showMoveNumbers: false };
+const defaultSettings: Settings = { theme: "system", confirmTap: true, coords: true, ai: { provider: "anthropic", keys: {}, models: {}, customBase: "" }, analysisDepth: "standard", autoKatago: true, showMoveNumbers: false };
 
 export interface ProblemStat { ok: number; ko: number; box: number; due: number; last: number; }
 export interface Progress {
@@ -33,12 +28,32 @@ export interface Progress {
 }
 const defaultProgress: Progress = { lessons: {}, problems: {}, rating: 2, ratingGames: 0, streakDays: [] };
 
+export interface ReviewMove { p: number; winrate: number; lead: number; visits: number; pv: number[]; }
+export interface ReviewPos {
+  /** chance de gain et avance de Noir */
+  winrateBlack: number; leadBlack: number;
+  /** meilleurs coups pour le joueur au trait (chance de gain et avance de son point de vue) */
+  best: ReviewMove[];
+  /** rang du coup joué parmi les candidats (−1 s'il n'y figure pas) */
+  playedRank?: number;
+}
+export interface ReviewData { depth: string; positions: ReviewPos[]; }
+
 export interface SavedGame {
   id: string; date: number; data: GameData;
   mode: "ai" | "claude" | "local"; level?: number; human?: 0 | 1 | 2;
   result?: string; winner?: 0 | 1 | 2; margin?: number;
-  review?: { winrateBlack: number; leadBlack: number; best: number[]; policy: number }[];
+  review?: ReviewData;
   title?: string;
+}
+
+/** Reprise des anciens réglages (clé Claude unique). */
+function migrate(s: Settings & { apiKey?: string; claudeModel?: string }): Settings {
+  if (!s.ai) s.ai = { provider: "anthropic", keys: {}, models: {}, customBase: "" };
+  if (s.apiKey) { s.ai.keys.anthropic = s.ai.keys.anthropic || s.apiKey; delete s.apiKey; }
+  if (s.claudeModel) { s.ai.models.anthropic = s.ai.models.anthropic || s.claudeModel; delete s.claudeModel; }
+  if (!s.analysisDepth) s.analysisDepth = "standard";
+  return s;
 }
 
 type L = () => void;
@@ -46,7 +61,7 @@ const listeners = new Set<L>();
 const emit = () => listeners.forEach((f) => f());
 
 export const store = {
-  settings: read<Settings>("settings", defaultSettings),
+  settings: migrate(read<Settings>("settings", defaultSettings)),
   progress: read<Progress>("progress", defaultProgress),
   games: readArr<SavedGame>("games"),
   current: (() => { try { const v = localStorage.getItem(KEY + "current"); return v ? (JSON.parse(v) as SavedGame) : null; } catch { return null; } })(),

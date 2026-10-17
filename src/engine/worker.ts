@@ -4,8 +4,12 @@ import { Brain } from "./brain";
 import { Net, RawOutputs } from "../katago/net";
 import { fromData, GameData } from "./serial";
 import { mcSearch } from "./mcts";
+import { search } from "../katago/search";
+import { pointOfIndex } from "../katago/net";
+import type { ReviewPos } from "../store";
 
 const brain = new Brain();
+let cancelReview = false;
 let session: ort.InferenceSession | null = null;
 
 type Req =
@@ -15,8 +19,9 @@ type Req =
   | { id: number; type: "analyze"; game: GameData; visits: number; timeMs: number }
   | { id: number; type: "dead"; game: GameData }
   | { id: number; type: "ownership"; game: GameData }
-  | { id: number; type: "review"; game: GameData }
-  | { id: number; type: "mc"; game: GameData; timeMs: number };
+  | { id: number; type: "review"; game: GameData; visits: number }
+  | { id: number; type: "mc"; game: GameData; timeMs: number }
+  | { id: number; type: "cancel" };
 
 const post = (m: unknown, transfer: Transferable[] = []) => (self as unknown as Worker).postMessage(m, transfer);
 
@@ -62,18 +67,30 @@ self.onmessage = async (ev: MessageEvent<Req>) => {
       case "dead": post({ id: m.id, result: await brain.deadStones(fromData(m.game)) }); return;
       case "ownership": post({ id: m.id, result: await brain.ownership(fromData(m.game)) }); return;
       case "mc": { const g = fromData(m.game); const r = mcSearch(g.board, g.toPlay, g.komi, { timeMs: m.timeMs }); post({ id: m.id, result: r }); return; }
+      case "cancel": cancelReview = true; post({ id: m.id, result: true }); return;
       case "review": {
         if (!brain.net) { post({ id: m.id, result: null }); return; }
-        const total = m.game.moves.length, out = [];
+        cancelReview = false;
+        const total = m.game.moves.length, positions: ReviewPos[] = [];
         for (let i = 0; i <= total; i++) {
+          if (cancelReview) break;
           const g = fromData(m.game, i);
-          const e = await brain.net.evaluate(g);
-          const best = Array.from(e.policy.keys()).sort((a, b) => e.policy[b] - e.policy[a]).slice(0, 3);
           const sgn = g.toPlay === 1 ? 1 : -1;
-          out.push({ winrateBlack: sgn === 1 ? e.winrate : 1 - e.winrate, leadBlack: sgn * e.lead, best, policy: i < total ? e.policy[idxOf(g, m.game.moves[i][1])] : 0 });
+          let wr: number, lead: number, best: ReviewPos["best"];
+          if (m.visits <= 1) {
+            const e = await brain.net.evaluate(g);
+            wr = e.winrate; lead = e.lead;
+            best = Array.from(e.policy.keys()).sort((a, b) => e.policy[b] - e.policy[a]).slice(0, 3).map((k) => ({ p: pointOfIndex(g, k), winrate: e.winrate, lead: e.lead, visits: 0, pv: [pointOfIndex(g, k)] }));
+          } else {
+            const r = await search(brain.net, g, m.visits, {});
+            wr = r.winrate; lead = r.lead;
+            best = r.candidates.slice(0, 4).map((c) => ({ p: c.p, winrate: c.winrate, lead: c.lead, visits: c.visits, pv: c.pv.slice(0, 10) }));
+          }
+          const played = i < total ? m.game.moves[i][1] : undefined;
+          positions.push({ winrateBlack: sgn === 1 ? wr : 1 - wr, leadBlack: sgn * lead, best, playedRank: played === undefined ? undefined : best.findIndex((b) => b.p === played) });
           post({ id: m.id, progress: (i + 1) / (total + 1) });
         }
-        post({ id: m.id, result: out });
+        post({ id: m.id, result: positions });
         return;
       }
     }

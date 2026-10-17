@@ -5,7 +5,7 @@ import { engine, MODEL_MB } from "../engine/client";
 import { useStore, store, SavedGame } from "../store";
 import { Game } from "../go/game";
 import { toData } from "../engine/serial";
-import { hasKey } from "../coach/claude";
+import { hasKey, aiName } from "../coach/ai";
 
 interface Setup { mode: "ai" | "claude" | "local"; level: number; size: 9 | 13 | 19; human: 1 | 2; handicap: number; }
 const KEY = "tengen.setup";
@@ -61,12 +61,12 @@ export function PlayScreen() {
         {cur && (
           <div class="card stack" style="gap:8px">
             <b>Partie en cours</b>
-            <span class="small muted">{cur.data.size}×{cur.data.size} · {cur.mode === "ai" ? "contre " + LEVELS[cur.level ?? 0].name : cur.mode === "claude" ? "contre Claude" : "à deux"} · coup {cur.data.moves.length}</span>
+            <span class="small muted">{cur.data.size}×{cur.data.size} · {cur.mode === "ai" ? "contre " + LEVELS[cur.level ?? 0].name : cur.mode === "claude" ? "contre " + aiName() : "à deux"} · coup {cur.data.moves.length}</span>
             <div class="row"><a class="btn primary" href="#/partie">Reprendre</a></div>
           </div>
         )}
         <h2>Nouvelle partie</h2>
-        <Seg label="Adversaire" value={st.mode} options={[["ai", "Ordinateur"], ["claude", "Claude"], ["local", "À deux"]]} onChange={(v) => upd({ mode: v })} />
+        <Seg label="Adversaire" value={st.mode} options={[["ai", "Ordinateur"], ["claude", "IA"], ["local", "À deux"]]} onChange={(v) => upd({ mode: v })} />
         {st.mode === "ai" && (
           <div class="field">
             <span class="label">Niveau</span>
@@ -83,8 +83,8 @@ export function PlayScreen() {
         )}
         {st.mode === "claude" && (
           <div class="card small stack" style="gap:6px">
-            <p>Claude joue en choisissant parmi les meilleurs coups calculés par KataGo, et t'explique son idée à chaque coup. Chaque coup consomme un peu de crédit sur ta clé API.</p>
-            {!hasKey() && <a class="btn" href="#/reglages">Ajouter ma clé API</a>}
+            <p>{hasKey() ? aiName() : "L'IA de ton choix (Claude, ChatGPT, Gemini…)"} joue en choisissant parmi les meilleurs coups calculés par KataGo, et t'explique son idée à chaque coup. Chaque coup consomme un peu de crédit sur ta clé API.</p>
+            {!hasKey() && <a class="btn" href="#/reglages">Choisir une IA et ajouter ma clé</a>}
           </div>
         )}
         {needKata && kata.status !== "ready" && <KataCard />}

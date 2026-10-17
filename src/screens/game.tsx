@@ -7,7 +7,7 @@ import { fromData, toData } from "../engine/serial";
 import { engine } from "../engine/client";
 import { LEVELS } from "../engine/levels";
 import { store, useStore, SavedGame } from "../store";
-import { ask, hasKey, boardText, lastMovesText, extractJson, ClaudeError } from "../coach/claude";
+import { ask, hasKey, boardText, lastMovesText, extractJson, AIError, aiName } from "../coach/ai";
 import { useKata } from "./play";
 
 const colName = (c: Color) => (c === BLACK ? "Noir" : "Blanc");
@@ -72,7 +72,7 @@ export function GameScreen() {
   }, [botTurn, game?.moves.length, busy]);
 
   if (!saved || !game) return <><Header sub="Partie" back="jouer" /><p>Aucune partie en cours. <a href="#/jouer">Lancer une partie</a></p></>;
-  const title = saved.mode === "ai" ? "contre " + LEVELS[saved.level ?? 0].name : saved.mode === "claude" ? "contre Claude" : "à deux";
+  const title = saved.mode === "ai" ? "contre " + LEVELS[saved.level ?? 0].name : saved.mode === "claude" ? "contre " + aiName() : "à deux";
 
   async function claudeMove(g: Game): Promise<{ p: number; msg: string }> {
     setClaude({ text: "", thinking: true });
@@ -93,7 +93,7 @@ export function GameScreen() {
       const hit = cands.find((c) => g.board.name(c.p) === want);
       return { p: (hit || cands[0]).p, msg: j?.message || "" };
     } catch (e) {
-      return { p: cands[0].p, msg: (e as ClaudeError).message + " KataGo joue à ma place." };
+      return { p: cands[0].p, msg: (e as AIError).message + " KataGo joue à ma place." };
     }
   }
 
@@ -194,7 +194,7 @@ export function GameScreen() {
   if (scoring) { marks.dead = scoring; const sc = areaScore(game.board, scoring); const t: Record<number, 1 | 2> = {}; for (const p of game.board.points()) if ((!game.board.c[p] || scoring.has(p)) && sc.owner[p]) t[p] = sc.owner[p] as 1 | 2; marks.terr = t; }
   if (ended && saved.result) { /* garder le plateau final */ }
   const sc = scoring ? game.score(scoring) : null;
-  const turnLabel = ended ? "Partie terminée" : scoring ? "Décompte" : botTurn ? (saved.mode === "claude" ? "Claude réfléchit" : "L'ordinateur réfléchit") : saved.mode === "local" ? `À ${colName(game.toPlay)}` : `À toi (${colName(game.toPlay)})`;
+  const turnLabel = ended ? "Partie terminée" : scoring ? "Décompte" : botTurn ? (saved.mode === "claude" ? aiName() + " réfléchit" : "L'ordinateur réfléchit") : saved.mode === "local" ? `À ${colName(game.toPlay)}` : `À toi (${colName(game.toPlay)})`;
 
   return (
     <>
@@ -208,7 +208,7 @@ export function GameScreen() {
         <Goban board={game.board} marks={marks} onTap={tap} full coords={store.settings.coords} />
         <p class="small muted" role="status" style="min-height:1.5em">{msg}</p>
         {claude && saved.mode === "claude" && !ended && (
-          <div class="card bubble"><span class="av">C</span><span class={"tx" + (claude.thinking ? " thinking" : "")}>{claude.thinking ? "Claude choisit son coup" : claude.text}</span></div>
+          <div class="card bubble"><span class="av">IA</span><span class={"tx" + (claude.thinking ? " thinking" : "")}>{claude.thinking ? aiName() + " choisit son coup" : claude.text}</span></div>
         )}
         {scoring && !ended && sc && (
           <div class="card stack">
@@ -275,8 +275,8 @@ export function Coach(props: { game: Game; context?: string }) {
   const ctl = useRef<AbortController | null>(null);
   const g = props.game;
   if (!hasKey()) return (
-    <details class="card"><summary style="font-weight:700;cursor:pointer">Demander conseil à Claude</summary>
-      <p class="small muted" style="margin-top:8px">Ajoute ta clé API Anthropic dans les réglages pour poser des questions sur la position à un professeur.</p>
+    <details class="card"><summary style="font-weight:700;cursor:pointer">Demander conseil à l'IA</summary>
+      <p class="small muted" style="margin-top:8px">Choisis une IA (Claude, ChatGPT, Gemini…) et ajoute ta clé dans les réglages pour poser des questions sur la position à un professeur.</p>
       <a class="btn small" href="#/reglages">Ouvrir les réglages</a>
     </details>
   );
@@ -294,10 +294,10 @@ export function Coach(props: { game: Game; context?: string }) {
     setBusy(false);
   }
   return (
-    <details class="card"><summary style="font-weight:700;cursor:pointer">Demander conseil à Claude</summary>
+    <details class="card"><summary style="font-weight:700;cursor:pointer">Demander conseil à {aiName()}</summary>
       <div class="stack" style="margin-top:10px;gap:8px">
-        {out && <div class="bubble"><span class="av">C</span><span class="tx">{out}</span></div>}
-        {busy && !out && <div class="bubble"><span class="av">C</span><span class="tx thinking">Claude réfléchit</span></div>}
+        {out && <div class="bubble"><span class="av">IA</span><span class="tx">{out}</span></div>}
+        {busy && !out && <div class="bubble"><span class="av">IA</span><span class="tx thinking">{aiName()} réfléchit</span></div>}
         <textarea id="coach-q" aria-label="Ta question" value={q} onInput={(e) => setQ((e.target as HTMLTextAreaElement).value)} />
         <div class="row">
           <button class="btn small primary" onClick={send} disabled={busy}>Demander</button>
