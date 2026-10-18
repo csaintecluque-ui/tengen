@@ -1,7 +1,7 @@
 {
   "name": "tengen",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.1.1",
   "type": "module",
   "description": "Tengen \u2014 apprendre et jouer au go, avec KataGo embarqu\u00e9",
   "scripts": {

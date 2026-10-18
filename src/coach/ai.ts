@@ -71,7 +71,8 @@ async function readSSE(res: Response, onEvent: (data: string) => string | void, 
   const reader = res.body!.getReader(), dec = new TextDecoder(); let buf = "";
   try {
     for (;;) {
-      const { done, value } = await reader.read(); if (done) break;
+      const { done, value } = await reader.read();
+      if (done) { for (const line of buf.split(/\r?\n/)) if (line.startsWith("data:")) onEvent(line.slice(5).trim()); break; }
       buf += dec.decode(value, { stream: true });
       let idx: number;
       while ((idx = buf.search(/\r?\n\r?\n/)) >= 0) {
@@ -82,27 +83,39 @@ async function readSSE(res: Response, onEvent: (data: string) => string | void, 
   } catch (e) { if (signal?.aborted || (e as Error).name === "AbortError") throw new AIError("cancelled", "Arrêté."); throw e; }
 }
 
-export async function ask(prompt: string, opts: { onText?: (t: string) => void; signal?: AbortSignal; maxTokens?: number; system?: string } = {}): Promise<string> {
+type AskOpts = { onText?: (t: string) => void; signal?: AbortSignal; maxTokens?: number; system?: string };
+
+function partsText(c: unknown): string {
+  if (typeof c === "string") return c;
+  if (Array.isArray(c)) return c.map((p) => (typeof p === "string" ? p : (p as { text?: string })?.text || "")).join("");
+  return "";
+}
+
+/** Un appel au fournisseur. `stream: false` sert de seconde chance quand le flux revient vide. */
+async function call(prompt: string, opts: AskOpts, stream: boolean, budget: number): Promise<{ text: string; finish: string; thought: boolean; err: string }> {
   const ai = store.settings.ai, pid = ai.provider, key = currentKey(), model = currentModel();
-  const system = opts.system ?? SYSTEM, maxTokens = opts.maxTokens ?? 800;
-  if (!hasKey()) throw new AIError("no_key", "Choisis une IA et ajoute ta clé dans Réglages.");
+  const system = opts.system ?? SYSTEM;
   let url = "", headers: Record<string, string> = { "content-type": "application/json" }, body: unknown;
   if (pid === "anthropic") {
     url = "https://api.anthropic.com/v1/messages";
     headers = { ...headers, "x-api-key": key, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" };
-    body = { model, max_tokens: maxTokens, stream: true, system, messages: [{ role: "user", content: prompt }] };
+    body = { model, max_tokens: budget, stream, system, messages: [{ role: "user", content: prompt }] };
   } else if (pid === "google") {
     const m = model.replace(/^models\//, "");
-    url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:streamGenerateContent?alt=sse`;
+    url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:${stream ? "streamGenerateContent?alt=sse" : "generateContent"}`;
     headers = { ...headers, "x-goog-api-key": key };
-    body = { systemInstruction: { parts: [{ text: system }] }, contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: Math.max(maxTokens, 1024) } };
+    body = { systemInstruction: { parts: [{ text: system }] }, contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: budget } };
   } else {
     const base = pid === "openai" ? "https://api.openai.com/v1" : pid === "xai" ? "https://api.x.ai/v1" : pid === "openrouter" ? "https://openrouter.ai/api/v1" : ai.customBase.trim().replace(/\/+$/, "");
     url = base + "/chat/completions";
     if (key) headers.authorization = "Bearer " + key;
-    if (pid === "openrouter") { headers["HTTP-Referer"] = location.origin + location.pathname; headers["X-Title"] = "Tengen"; }
-    const tokens = pid === "openai" ? { max_completion_tokens: Math.max(maxTokens, 2000) } : { max_tokens: maxTokens };
-    body = { model, stream: true, messages: [{ role: "system", content: system }, { role: "user", content: prompt }], ...tokens };
+    const extra: Record<string, unknown> = pid === "openai" ? { max_completion_tokens: budget } : { max_tokens: budget };
+    if (pid === "openrouter") {
+      headers["HTTP-Referer"] = location.origin + location.pathname; headers["X-Title"] = "Tengen";
+      // Les modèles « qui réfléchissent » : réflexion courte et non renvoyée, pour garder du budget pour la réponse.
+      extra.reasoning = { effort: "low", exclude: true };
+    }
+    body = { model, stream, messages: [{ role: "system", content: system }, { role: "user", content: prompt }], ...extra };
   }
   let res: Response;
   try { res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal: opts.signal }); }
@@ -111,18 +124,77 @@ export async function ask(prompt: string, opts: { onText?: (t: string) => void; 
     throw new AIError("network", `Impossible de joindre ${provider().name}. Vérifie ta connexion${pid === "custom" ? ", l'adresse du service et qu'il accepte les appels depuis un navigateur (CORS)" : ""}.`);
   }
   if (!res.ok) { let d = ""; try { const j = await res.json(); d = j?.error?.message || j?.message || ""; } catch { /* */ } throw httpError(res.status, d); }
-  let text = "";
-  await readSSE(res, (data) => {
-    if (!data || data === "[DONE]") return;
-    let ev: any; try { ev = JSON.parse(data); } catch { return; }
+
+  let text = "", finish = "", thought = false, err = "";
+  const take = (ev: any, whole: boolean) => {
+    if (ev?.error) { err = typeof ev.error === "string" ? ev.error : ev.error.message || JSON.stringify(ev.error); return; }
     let delta = "";
-    if (pid === "anthropic") { if (ev.type === "content_block_delta" && ev.delta?.type === "text_delta") delta = ev.delta.text; if (ev.type === "error") throw new AIError("stream", ev.error?.message || "Erreur."); }
-    else if (pid === "google") { delta = (ev.candidates?.[0]?.content?.parts || []).map((p: { text?: string }) => p.text || "").join(""); }
-    else { delta = ev.choices?.[0]?.delta?.content || ""; if (ev.error) throw new AIError("stream", ev.error.message || "Erreur."); }
+    if (pid === "anthropic") {
+      if (whole) { delta = (ev.content || []).filter((b: { type: string }) => b.type === "text").map((b: { text: string }) => b.text).join(""); finish = ev.stop_reason || ""; thought = (ev.content || []).some((b: { type: string }) => b.type === "thinking"); }
+      else {
+        if (ev.type === "content_block_delta" && ev.delta?.type === "text_delta") delta = ev.delta.text;
+        if (ev.type === "content_block_delta" && ev.delta?.type === "thinking_delta") thought = true;
+        if (ev.type === "message_delta" && ev.delta?.stop_reason) finish = ev.delta.stop_reason;
+      }
+    } else if (pid === "google") {
+      const c = ev.candidates?.[0];
+      const parts: { text?: string; thought?: boolean }[] = c?.content?.parts || [];
+      if (parts.some((p) => p.thought)) thought = true;
+      delta = parts.filter((p) => !p.thought).map((p) => p.text || "").join("");
+      if (c?.finishReason) finish = c.finishReason;
+      if ((ev.usageMetadata?.thoughtsTokenCount || 0) > 0) thought = true;
+    } else {
+      const c = ev.choices?.[0];
+      const m = whole ? c?.message : c?.delta;
+      delta = partsText(m?.content);
+      if (m?.reasoning || m?.reasoning_content || m?.reasoning_details?.length) thought = true;
+      if ((ev.usage?.completion_tokens_details?.reasoning_tokens || 0) > 0) thought = true;
+      if (c?.finish_reason) finish = c.finish_reason;
+      if (c?.error) err = c.error.message || JSON.stringify(c.error);
+    }
     if (delta) { text += delta; opts.onText?.(text); }
-  }, opts.signal);
-  if (!text) throw new AIError("empty", "L'IA n'a rien répondu. Essaie un autre modèle.");
-  return text;
+  };
+  if (stream) {
+    await readSSE(res, (data) => {
+      if (!data || data === "[DONE]") return;
+      let ev: any; try { ev = JSON.parse(data); } catch { return; }
+      if (pid === "anthropic" && ev.type === "error") { err = ev.error?.message || "Erreur."; return; }
+      take(ev, false);
+    }, opts.signal);
+  } else {
+    let j: any; try { j = await res.json(); } catch { j = null; }
+    if (j) take(j, true);
+  }
+  return { text, finish, thought, err };
+}
+
+export async function ask(prompt: string, opts: AskOpts = {}): Promise<string> {
+  if (!hasKey()) throw new AIError("no_key", "Choisis une IA et ajoute ta clé dans Réglages.");
+  const pid = store.settings.ai.provider, model = currentModel();
+  const want = opts.maxTokens ?? 800;
+  // Marge confortable : beaucoup de modèles récents « réfléchissent » avant de répondre et ces jetons comptent dans le budget.
+  const budget = pid === "anthropic" ? want : Math.max(want * 4, 4000);
+  let r: Awaited<ReturnType<typeof call>>;
+  try { r = await call(prompt, opts, true, budget); }
+  catch (e) {
+    // Petit solde OpenRouter : il refuse un budget maximal trop grand. On redemande avec le budget normal.
+    if (e instanceof AIError && e.code === "credit" && /max_tokens|fewer|afford/i.test(e.message) && budget > want) r = await call(prompt, opts, true, want);
+    else throw e;
+  }
+  if (r.text.trim()) return r.text;
+  if (opts.signal?.aborted) throw new AIError("cancelled", "Arrêté.");
+  // Seconde chance, sans flux et avec plus de place (certains services renvoient la réponse uniquement en bloc).
+  const first = r;
+  try { r = await call(prompt, opts, false, Math.max(budget * 2, 8000)); } catch (e) { if ((e as AIError).code === "cancelled") throw e; }
+  if (r.text.trim()) return r.text;
+  const err = r.err || first.err, thought = r.thought || first.thought, finish = r.finish || first.finish;
+  const name = `« ${model} »`;
+  if (err) throw new AIError("stream", `${provider().name} a renvoyé une erreur pour ${name} : ${err}`);
+  if (thought || /length|max_tokens|MAX_TOKENS/i.test(finish))
+    throw new AIError("empty", `Le modèle ${name} a passé tout son temps à réfléchir sans écrire de réponse. Choisis un modèle sans « raisonnement » dans Réglages (par ex. une version « mini », « flash » ou « haiku »).`);
+  if (/content_filter|SAFETY|RECITATION|refusal/i.test(finish))
+    throw new AIError("empty", `Le modèle ${name} a refusé de répondre (filtre du fournisseur). Essaie un autre modèle.`);
+  throw new AIError("empty", `Le modèle ${name} n'a renvoyé aucun texte${finish ? ` (fin : ${finish})` : ""}. Essaie un autre modèle dans Réglages.`);
 }
 
 /** Liste des modèles disponibles chez le fournisseur (avec la clé saisie). */
@@ -149,7 +221,7 @@ export async function listModels(pid: ProviderId, key: string, customBase = ""):
   }
 }
 
-export async function testAI(): Promise<string> { return ask("Réponds seulement : « Prêt pour la leçon ! »", { maxTokens: 40 }); }
+export async function testAI(): Promise<string> { return ask("Réponds seulement : « Prêt pour la leçon ! »", { maxTokens: 200 }); }
 
 export function extractJson<T>(t: string): T | null {
   const a = t.indexOf("{"), b = t.lastIndexOf("}");
