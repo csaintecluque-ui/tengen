@@ -18,7 +18,8 @@ export const PROVIDERS: Provider[] = [
   { id: "openai", name: "ChatGPT", brand: "OpenAI", keyHint: "sk-…", console: "platform.openai.com", note: "Les modèles GPT d'OpenAI.", defaultModel: "", suggested: [] },
   { id: "google", name: "Gemini", brand: "Google", keyHint: "AIza…", console: "aistudio.google.com", note: "Les modèles Gemini de Google (clé gratuite possible avec limites).", defaultModel: "", suggested: [] },
   { id: "xai", name: "Grok", brand: "xAI", keyHint: "xai-…", console: "console.x.ai", note: "Les modèles Grok de xAI.", defaultModel: "", suggested: [] },
-  { id: "openrouter", name: "OpenRouter", brand: "OpenRouter", keyHint: "sk-or-…", console: "openrouter.ai", note: "Une seule clé pour des centaines de modèles : Mistral, DeepSeek, Llama, Qwen, et aussi GPT, Gemini ou Claude.", defaultModel: "", suggested: [] },
+  { id: "openrouter", name: "OpenRouter", brand: "OpenRouter", keyHint: "sk-or-…", console: "openrouter.ai", note: "Une seule clé pour des centaines de modèles : Mistral, DeepSeek, Llama, Qwen, et aussi GPT, Gemini ou Claude.",
+    defaultModel: "anthropic/claude-haiku-5.5", suggested: [{ id: "anthropic/claude-haiku-5.5", label: "Claude Haiku 5.5 · rapide, économique" }, { id: "anthropic/claude-sonnet-5.5", label: "Claude Sonnet 5.5 · plus fin" }] },
   { id: "custom", name: "Compatible OpenAI", brand: "Autre service", keyHint: "clé (facultative)", console: "", note: "Pour un service compatible avec l'API d'OpenAI (adresse https obligatoire, et le service doit accepter les appels depuis un navigateur).", defaultModel: "", suggested: [] },
 ];
 
@@ -181,8 +182,17 @@ export async function ask(prompt: string, opts: AskOpts = {}): Promise<string> {
     if (e instanceof AIError && e.code === "credit" && /max_tokens|fewer|afford/i.test(e.message) && budget > want) r = await call(prompt, opts, true, want);
     else throw e;
   }
-  if (r.text.trim()) return r.text;
+  const cut = /length|max_tokens|MAX_TOKENS/i.test(r.finish);
+  // Réponse complète, ou longue même si coupée : on la garde.
+  if (r.text.trim() && (!cut || r.text.length > 600)) return r.text;
   if (opts.signal?.aborted) throw new AIError("cancelled", "Arrêté.");
+  if (r.text.trim()) {
+    // Réponse tronquée au bout de quelques mots (le modèle a tout dépensé en réflexion) : on redemande avec beaucoup plus de place.
+    const partial = r.text;
+    try { const r2 = await call(prompt, opts, false, Math.max(budget * 2, 12000)); if (r2.text.trim().length > partial.trim().length) { opts.onText?.(r2.text); return r2.text; } } catch (e) { if ((e as AIError).code === "cancelled") throw e; }
+    opts.onText?.(partial);
+    return partial + "\n\n(Réponse coupée : ce modèle réfléchit trop longtemps. Choisis-en un plus direct dans Réglages, par exemple Claude Haiku.)";
+  }
   // Seconde chance, sans flux et avec plus de place (certains services renvoient la réponse uniquement en bloc).
   const first = r;
   try { r = await call(prompt, opts, false, Math.max(budget * 2, 8000)); } catch (e) { if ((e as AIError).code === "cancelled") throw e; }

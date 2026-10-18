@@ -189,7 +189,7 @@ function ReviewInner({ sg }: { sg: SavedGame }) {
             {next && st && (
               <div class="stack" style="gap:6px">
                 <div class="spread"><b>Coup {i + 1} : {next[0] === BLACK ? "Noir" : "Blanc"} {game.board.name(next[1])} <span class="muted small">(marqué d'une croix)</span></b>{st.kind && <span class={"chip " + (st.kind === "Gaffe" ? "warn" : st.kind === "Erreur" ? "copper" : "")}>{st.kind}</span>}</div>
-                <p class="small">{st.loss < 0.5 ? "Excellent coup, conforme à KataGo." : `Perte estimée : ${fr(st.loss)} point${st.loss >= 2 ? "s" : ""}, chances de gain −${Math.round(st.drop * 100)} %.`}{st.rank === 0 ? " C'est le premier choix de KataGo." : st.rank > 0 ? ` C'est son choix n° ${st.rank + 1}.` : ""}</p>
+                <p class="small">{st.loss < 0.5 ? "Excellent coup, conforme à KataGo." : `Perte estimée : ${fr(st.loss)} point${st.loss >= 2 ? "s" : ""}${Math.round(st.drop * 100) >= 1 ? `, chances de gain −${Math.round(st.drop * 100)} %` : " (sans changer l'issue de la partie)"}.`}{st.rank === 0 ? " C'est le premier choix de KataGo." : st.rank > 0 ? ` C'est son choix n° ${st.rank + 1}.` : ""}</p>
               </div>
             )}
             <div class="stack" style="gap:4px">
@@ -222,7 +222,7 @@ function ReviewInner({ sg }: { sg: SavedGame }) {
                 return (
                   <button class="item" style="grid-template-columns:44px 1fr auto" key={m.i} onClick={() => navigate(m.i)}>
                     <span class={"stone" + (m.col === BLACK ? "" : " w")}>{m.i + 1}</span>
-                    <span class="t"><b>{g.board.name(data.moves[m.i][1])} au lieu de {g.board.name(review[m.i].best[0].p)}</b><small>≈ {fr(m.loss)} points perdus · −{Math.round(m.drop * 100)} % de chances</small></span>
+                    <span class="t"><b>{g.board.name(data.moves[m.i][1])} au lieu de {g.board.name(review[m.i].best[0].p)}</b><small>≈ {fr(m.loss)} points perdus{Math.round(m.drop * 100) >= 1 ? ` · −${Math.round(m.drop * 100)} % de chances` : " · l'issue ne change pas"}</small></span>
                     <span class={"chip " + (m.kind === "Gaffe" ? "warn" : m.kind === "Erreur" ? "copper" : "")}>{m.kind}</span>
                   </button>
                 );
