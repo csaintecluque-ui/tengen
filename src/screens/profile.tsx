@@ -8,6 +8,7 @@ import { engine, MODEL_URL, MODEL_MB } from "../engine/client";
 import { useKata, KataCard } from "./play";
 import { PROVIDERS, ProviderId, listModels, testAI, ROLES, AIRole, aiName, providerById } from "../coach/ai";
 import { fromSgf } from "../go/sgf";
+import { shareBackup, copyBackup, parseBackup, restoreBackup, backupSummary, makeBackup, Backup } from "../backup";
 
 export function ProfileScreen() {
   const s = useStore();
@@ -116,7 +117,8 @@ export function SettingsScreen() {
         )}
 
         <h2 style="margin-top:8px">Données</h2>
-        <p class="small muted">Ta progression, tes parties et tes réglages restent sur cet appareil. Exporte tes parties importantes en SGF depuis l'écran d'analyse.</p>
+        <p class="small muted">Ta progression, tes parties et tes réglages restent sur cet appareil. Sur iPhone, supprimer l'appli de l'écran d'accueil efface ces données : fais d'abord une sauvegarde.</p>
+        <BackupCard />
         <button class="btn small danger" onClick={() => { if (confirmReset) { store.resetProgress(); setConfirmReset(false); toast("Progression remise à zéro"); } else { setConfirmReset(true); setTimeout(() => setConfirmReset(false), 3000); } }}>{confirmReset ? "Confirmer la remise à zéro" : "Remettre la progression à zéro"}</button>
 
         <h2 style="margin-top:8px">À propos</h2>
@@ -127,6 +129,40 @@ export function SettingsScreen() {
         </div>
       </div>
     </>
+  );
+}
+
+function BackupCard() {
+  const [pending, setPending] = useState<Backup | null>(null);
+  const [paste, setPaste] = useState(false);
+  const [text, setText] = useState("");
+  const now = backupSummary(makeBackup());
+  const load = (t: string) => { try { setPending(parseBackup(t)); setPaste(false); } catch (e) { toast((e as Error).message); } };
+  return (
+    <div class="card stack" style="gap:10px">
+      <b>Sauvegarde</b>
+      <p class="small muted" style="margin:0">Sur cet appareil : {now.lessons} leçons, {now.problems} problèmes travaillés, {now.games} parties.</p>
+      <div class="row" style="flex-wrap:wrap;gap:8px">
+        <button class="btn small primary" onClick={async () => { const r = await shareBackup(); if (r === "downloaded") toast("Sauvegarde téléchargée"); else if (r === "shared") toast("Sauvegarde envoyée"); }}>Exporter ma sauvegarde</button>
+        <button class="btn small" onClick={async () => toast((await copyBackup()) ? "Sauvegarde copiée : colle-la dans Notes" : "Copie impossible")}>Copier en texte</button>
+      </div>
+      <div class="row" style="flex-wrap:wrap;gap:8px">
+        <label class="btn small">Importer un fichier<input type="file" accept="application/json,.json,text/plain" hidden onChange={async (e) => { const f = (e.currentTarget as HTMLInputElement).files?.[0]; if (f) load(await f.text()); }} /></label>
+        <button class="btn small" onClick={() => setPaste(!paste)}>Coller une sauvegarde</button>
+      </div>
+      {paste && (
+        <div class="stack" style="gap:6px">
+          <textarea rows={4} style="width:100%;font-size:12px" placeholder='{"app":"tengen",…}' value={text} onInput={(e) => setText((e.currentTarget as HTMLTextAreaElement).value)} />
+          <button class="btn small" onClick={() => load(text)}>Vérifier</button>
+        </div>
+      )}
+      {pending && (() => { const b = backupSummary(pending); return (
+        <div class="card small stack" style="gap:6px">
+          <p style="margin:0">Sauvegarde du {new Date(pending.at).toLocaleString("fr-FR")} : {b.lessons} leçons, {b.problems} problèmes, {b.games} parties.</p>
+          <p class="muted" style="margin:0">Elle remplacera les données actuelles de cet appareil.</p>
+          <div class="row" style="gap:8px"><button class="btn small primary" onClick={() => restoreBackup(pending)}>Restaurer</button><button class="btn small" onClick={() => setPending(null)}>Annuler</button></div>
+        </div>); })()}
+    </div>
   );
 }
 

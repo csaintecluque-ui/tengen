@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="0" fill="#1B1512"/><g transform="translate(10.0 10.0) scale(0.8)"><defs><clipPath id="c"><circle cx="50" cy="50" r="34"/></clipPath>
+<radialGradient id="bs" cx="38%" cy="34%" r="70%"><stop offset="0" stop-color="#4a3c33"/><stop offset="1" stop-color="#0f0b09"/></radialGradient>
+<radialGradient id="ws" cx="38%" cy="34%" r="75%"><stop offset="0" stop-color="#fbf3e2"/><stop offset="1" stop-color="#d9c39c"/></radialGradient></defs>
+<circle cx="50" cy="50" r="41" fill="none" stroke="#C9804F" stroke-width="1.6"/>
+<circle cx="50" cy="50" r="36.5" fill="none" stroke="#C9804F" stroke-width="0.6"/>
+<polygon points="9,47.6 10.4,50 9,52.4 7.6,50" fill="#C9804F"/><polygon points="91,47.6 92.4,50 91,52.4 89.6,50" fill="#C9804F"/>
+<polygon points="50,6 51,8.6 53.6,9.6 51,10.6 50,13.2 49,10.6 46.4,9.6 49,8.6" fill="#EAD9B8"/>
+<g clip-path="url(#c)"><circle cx="50" cy="50" r="34" fill="#2a211b"/><g stroke="#C9804F" stroke-width="0.9" opacity=".85"><line x1="24" y1="14" x2="24" y2="86"/><line x1="14" y1="24" x2="86" y2="24"/><line x1="37" y1="14" x2="37" y2="86"/><line x1="14" y1="37" x2="86" y2="37"/><line x1="50" y1="14" x2="50" y2="86"/><line x1="14" y1="50" x2="86" y2="50"/><line x1="63" y1="14" x2="63" y2="86"/><line x1="14" y1="63" x2="86" y2="63"/><line x1="76" y1="14" x2="76" y2="86"/><line x1="14" y1="76" x2="86" y2="76"/></g>
+<circle cx="24" cy="24" r="1.4" fill="#C9804F"/><circle cx="76" cy="24" r="1.4" fill="#C9804F"/><circle cx="24" cy="76" r="1.4" fill="#C9804F"/><circle cx="76" cy="76" r="1.4" fill="#C9804F"/></g>
+<circle cx="63" cy="37" r="6.2" fill="url(#ws)" stroke="#1B1512" stroke-width=".6"/>
+<circle cx="50" cy="50" r="6.4" fill="url(#bs)" stroke="#C9804F" stroke-width="1"/>
+<circle cx="37" cy="63" r="6.2" fill="url(#ws)" stroke="#1B1512" stroke-width=".6"/></g></svg>

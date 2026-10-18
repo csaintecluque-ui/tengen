@@ -1,16 +1,16 @@
-import asyncio, re
+# Icônes d'appli de Tengen (pierres sur le point central, aux couleurs Anamnesis).
+# Le sceau Anamnesis · CSC reste en favicon et dans l'appli. Lancer : python3 scripts/make-icons.py
+import asyncio
 from playwright.async_api import async_playwright
-seal = open('scripts/seal.svg').read()
-inner = re.sub(r'^<svg[^>]*>|</svg>\s*$', '', seal.strip(), flags=re.S)
-tile = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="22" fill="#1B1512"/><g transform="translate(7 7) scale(0.86)">{inner}</g></svg>'
-full = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#1B1512"/><g transform="translate(14 14) scale(0.72)">{inner}</g></svg>'
-open('public/icons/tile.svg','w').write(tile)
+tile = open('public/icons/tile.svg').read()
+full = open('scripts/icon-maskable.svg').read()
 async def main():
     async with async_playwright() as p:
         b = await p.chromium.launch()
-        for name, svg, size, transparent in [('icon-192.png', tile, 192, True), ('icon-512.png', tile, 512, True), ('apple-touch-icon.png', full, 180, False), ('icon-512-maskable.png', full, 512, False)]:
+        for name, svg, size, transparent in [('icon-192.png', tile, 192, True), ('icon-512.png', tile, 512, True), ('apple-touch-icon-v2.png', full.replace('scale(0.8)', 'scale(0.92)').replace('translate(10.0 10.0)', 'translate(4.0 4.0)'), 180, False), ('icon-512-maskable.png', full, 512, False)]:
             pg = await b.new_page(viewport={'width': size, 'height': size})
-            await pg.set_content(f'<html><body style="margin:0;background:transparent">{svg.replace("<svg ", f"<svg width=\"{size}\" height=\"{size}\" ",1)}</body></html>')
+            sized = svg.replace('<svg ', f'<svg width="{size}" height="{size}" ', 1)
+            await pg.set_content(f'<html><body style="margin:0;background:transparent">{sized}</body></html>')
             await pg.screenshot(path=f'public/icons/{name}', omit_background=transparent)
         await b.close()
 asyncio.run(main())
