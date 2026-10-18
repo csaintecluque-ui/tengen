@@ -50,9 +50,9 @@ export function GameScreen() {
       try {
         let p: number, resign = false, info = "";
         if (saved.mode === "claude") {
-          const r = await claudeMove(game);
+          const r = await claudeMove(game, saved.level ?? 4);
           if (my !== epoch.current) return;
-          p = r.p; info = r.msg;
+          p = r.p; info = r.msg; resign = !!r.resign;
           setClaude({ text: r.msg, thinking: false });
         } else {
           const r = await engine.genmove(game, saved.level ?? 0);
@@ -72,22 +72,36 @@ export function GameScreen() {
   }, [botTurn, game?.moves.length, busy]);
 
   if (!saved || !game) return <><Header sub="Partie" back="jouer" /><p>Aucune partie en cours. <a href="#/jouer">Lancer une partie</a></p></>;
-  const title = saved.mode === "ai" ? "contre " + LEVELS[saved.level ?? 0].name : saved.mode === "claude" ? "contre " + aiName() : "à deux";
+  const title = saved.mode === "ai" ? "contre " + LEVELS[saved.level ?? 0].name : saved.mode === "claude" ? "contre " + aiName("play") + " · " + LEVELS[saved.level ?? 4].name : "à deux";
 
-  async function claudeMove(g: Game): Promise<{ p: number; msg: string }> {
+  async function claudeMove(g: Game, level: number): Promise<{ p: number; msg: string; resign?: boolean }> {
     setClaude({ text: "", thinking: true });
+    const me = g.toPlay;
+    const head = `Tu joues une partie de go contre ton élève, qui débute (règles chinoises, komi ${fr(g.komi)}). Tu as les ${me === BLACK ? "Noirs (X)" : "Blancs (O)"}.\n\n${boardText(g)}\n\nDerniers coups : ${lastMovesText(g, 6)}.\nPierres capturées : Noir ${g.caps[0]}, Blanc ${g.caps[1]}.`;
+    if (level < 4) {
+      // Niveau réglé : le coup vient du moteur de ce niveau, l'IA se contente de l'expliquer.
+      const r = await engine.genmove(g, level);
+      if (r.resign) return { p: PASS, msg: "", resign: true };
+      if (r.p === PASS) return { p: PASS, msg: r.info.note || "Je passe." };
+      const mv = g.board.name(r.p);
+      const prompt = `${head}\n\nTu joues volontairement au niveau « ${LEVELS[level].name} » pour rester à la portée de ton élève. Ton coup est déjà choisi : ${mv}. Il n'est pas forcément le meilleur : ne prétends pas le contraire et ne dévoile pas de meilleur coup.\n\nÉcris 1 ou 2 phrases simples pour ton élève : l'idée de ton coup en ${mv} et, si utile, un mot bienveillant sur son dernier coup ou un danger pour ses pierres. Réponds uniquement en JSON : {"message": "..."}`;
+      try {
+        const txt = await ask(prompt, { maxTokens: 300, role: "play" });
+        const j = extractJson<{ message: string }>(txt);
+        return { p: r.p, msg: j?.message || txt.replace(/[{}"]/g, "").trim().slice(0, 400) };
+      } catch (e) { return { p: r.p, msg: (e as AIError).message }; }
+    }
     const r = await engine.analyze(g, g.size <= 9 ? 48 : 20, g.size <= 9 ? 2500 : 4000);
     const cands = (r?.candidates || []).slice(0, 5);
     if (!cands.length) return { p: PASS, msg: "Je passe." };
-    const me = g.toPlay;
     if (g.lastMove()?.p === PASS && cands[0].winrate > 0.5) {
       const dead = new Set(await engine.deadStones(g)); const sc = g.score(dead);
       if ((me === BLACK ? sc.margin : -sc.margin) > 0) return { p: PASS, msg: "Je passe aussi : on peut compter." };
     }
     const list = cands.map((c) => `${g.board.name(c.p)} (${Math.round(c.winrate * 100)} %)`).join(", ");
-    const prompt = `Tu joues une partie de go contre ton élève (règles chinoises, komi ${fr(g.komi)}). Tu as les ${me === BLACK ? "Noirs (X)" : "Blancs (O)"}.\n\n${boardText(g)}\n\nDerniers coups : ${lastMovesText(g, 6)}.\nPierres capturées : Noir ${g.caps[0]}, Blanc ${g.caps[1]}.\nCandidats de KataGo avec ta chance de gagner : ${list}.\n\nChoisis UN coup de cette liste (le premier en général, un autre seulement s'il est presque aussi bon et plus instructif). Puis écris 1 ou 2 phrases simples pour ton élève : l'idée de ton coup et, si utile, un commentaire sur son dernier coup ou un danger pour ses pierres. Réponds uniquement en JSON : {"coup": "D5", "message": "..."}`;
+    const prompt = `${head}\nCandidats de KataGo avec ta chance de gagner : ${list}.\n\nChoisis UN coup de cette liste (le premier en général, un autre seulement s'il est presque aussi bon et plus instructif). Puis écris 1 ou 2 phrases simples pour ton élève : l'idée de ton coup et, si utile, un commentaire sur son dernier coup ou un danger pour ses pierres. Réponds uniquement en JSON : {"coup": "D5", "message": "..."}`;
     try {
-      const txt = await ask(prompt, { maxTokens: 300 });
+      const txt = await ask(prompt, { maxTokens: 300, role: "play" });
       const j = extractJson<{ coup: string; message: string }>(txt);
       const want = j?.coup?.trim().toUpperCase();
       const hit = cands.find((c) => g.board.name(c.p) === want);
@@ -194,7 +208,7 @@ export function GameScreen() {
   if (scoring) { marks.dead = scoring; const sc = areaScore(game.board, scoring); const t: Record<number, 1 | 2> = {}; for (const p of game.board.points()) if ((!game.board.c[p] || scoring.has(p)) && sc.owner[p]) t[p] = sc.owner[p] as 1 | 2; marks.terr = t; }
   if (ended && saved.result) { /* garder le plateau final */ }
   const sc = scoring ? game.score(scoring) : null;
-  const turnLabel = ended ? "Partie terminée" : scoring ? "Décompte" : botTurn ? (saved.mode === "claude" ? aiName() + " réfléchit" : "L'ordinateur réfléchit") : saved.mode === "local" ? `À ${colName(game.toPlay)}` : `À toi (${colName(game.toPlay)})`;
+  const turnLabel = ended ? "Partie terminée" : scoring ? "Décompte" : botTurn ? (saved.mode === "claude" ? aiName("play") + " réfléchit" : "L'ordinateur réfléchit") : saved.mode === "local" ? `À ${colName(game.toPlay)}` : `À toi (${colName(game.toPlay)})`;
 
   return (
     <>
@@ -208,7 +222,7 @@ export function GameScreen() {
         <Goban board={game.board} marks={marks} onTap={tap} full coords={store.settings.coords} />
         <p class="small muted" role="status" style="min-height:1.5em">{msg}</p>
         {claude && saved.mode === "claude" && !ended && (
-          <div class="card bubble"><span class="av">IA</span><span class={"tx" + (claude.thinking ? " thinking" : "")}>{claude.thinking ? aiName() + " choisit son coup" : claude.text}</span></div>
+          <div class="card bubble"><span class="av">IA</span><span class={"tx" + (claude.thinking ? " thinking" : "")}>{claude.thinking ? aiName("play") + " choisit son coup" : claude.text}</span></div>
         )}
         {scoring && !ended && sc && (
           <div class="card stack">
@@ -274,7 +288,7 @@ export function Coach(props: { game: Game; context?: string }) {
   const [busy, setBusy] = useState(false);
   const ctl = useRef<AbortController | null>(null);
   const g = props.game;
-  if (!hasKey()) return (
+  if (!hasKey("coach")) return (
     <details class="card"><summary style="font-weight:700;cursor:pointer">Demander conseil à l'IA</summary>
       <p class="small muted" style="margin-top:8px">Choisis une IA (Claude, ChatGPT, Gemini…) et ajoute ta clé dans les réglages pour poser des questions sur la position à un professeur.</p>
       <a class="btn small" href="#/reglages">Ouvrir les réglages</a>
@@ -289,15 +303,15 @@ export function Coach(props: { game: Game; context?: string }) {
         if (r) engineInfo = `Analyse KataGo (${g.toPlay === BLACK ? "Noir" : "Blanc"} au trait) : chance de gain ${Math.round(r.winrate * 100)} %, avance ${fr(r.lead)} points. Meilleurs coups : ${r.candidates.slice(0, 4).map((c) => `${g.board.name(c.p)} (${Math.round(c.winrate * 100)} %, suite : ${c.pv.slice(0, 5).map((p) => g.board.name(p)).join(" ")})`).join(" ; ")}.`;
       }
       const prompt = `Position (${g.size}×${g.size}, komi ${fr(g.komi)}), c'est à ${g.toPlay === BLACK ? "Noir" : "Blanc"} de jouer :\n\n${boardText(g)}\n\nDerniers coups : ${lastMovesText(g)}.\nPierres capturées : Noir ${g.caps[0]}, Blanc ${g.caps[1]}.\n${engineInfo}\n${props.context || ""}\n\nQuestion de l'élève : ${q}\n\nRéponds en 6 phrases maximum.`;
-      await ask(prompt, { onText: setOut, signal: ctl.current.signal });
+      await ask(prompt, { role: "coach", onText: setOut, signal: ctl.current.signal });
     } catch (e) { setOut((x) => (x ? x + "\n\n" : "") + (e as Error).message); }
     setBusy(false);
   }
   return (
-    <details class="card"><summary style="font-weight:700;cursor:pointer">Demander conseil à {aiName()}</summary>
+    <details class="card"><summary style="font-weight:700;cursor:pointer">Demander conseil à {aiName("coach")}</summary>
       <div class="stack" style="margin-top:10px;gap:8px">
         {out && <div class="bubble"><span class="av">IA</span><span class="tx">{out}</span></div>}
-        {busy && !out && <div class="bubble"><span class="av">IA</span><span class="tx thinking">{aiName()} réfléchit</span></div>}
+        {busy && !out && <div class="bubble"><span class="av">IA</span><span class="tx thinking">{aiName("coach")} réfléchit</span></div>}
         <textarea id="coach-q" aria-label="Ta question" value={q} onInput={(e) => setQ((e.target as HTMLTextAreaElement).value)} />
         <div class="row">
           <button class="btn small primary" onClick={send} disabled={busy}>Demander</button>

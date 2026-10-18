@@ -11,7 +11,7 @@ export interface Settings {
   theme: "system" | "light" | "dark";
   confirmTap: boolean;
   coords: boolean;
-  ai: { provider: "anthropic" | "openai" | "google" | "xai" | "openrouter" | "custom"; keys: Record<string, string>; models: Record<string, string>; customBase: string };
+  ai: { provider: "anthropic" | "openai" | "google" | "xai" | "openrouter" | "custom"; keys: Record<string, string>; models: Record<string, string>; customBase: string; roles?: Partial<Record<"play" | "coach" | "review", { provider: Settings["ai"]["provider"]; model: string }>> };
   analysisDepth: "rapide" | "standard" | "approfondie";
   autoKatago: boolean;
   showMoveNumbers: boolean;

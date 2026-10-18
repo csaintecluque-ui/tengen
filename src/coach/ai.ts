@@ -25,15 +25,37 @@ export const PROVIDERS: Provider[] = [
 
 export class AIError extends Error { constructor(public code: string, msg: string) { super(msg); } }
 
-export function provider(): Provider { return PROVIDERS.find((p) => p.id === store.settings.ai.provider) || PROVIDERS[0]; }
-export function currentKey(): string { return (store.settings.ai.keys[store.settings.ai.provider] || "").trim(); }
-export function currentModel(): string { const ai = store.settings.ai; return (ai.models[ai.provider] || provider().defaultModel || "").trim(); }
-export function hasKey(): boolean {
+export type AIRole = "play" | "coach" | "review";
+export const ROLES: { id: AIRole; label: string; hint: string }[] = [
+  { id: "play", label: "Jouer contre toi", hint: "Un coup et une ou deux phrases à chaque tour : un modèle rapide et économique suffit." },
+  { id: "coach", label: "Conseils pendant la partie", hint: "Tes questions sur la position en cours." },
+  { id: "review", label: "Bilan des parties", hint: "Un texte plus long, une fois par partie : un modèle plus fin vaut le coup." },
+];
+
+export function providerById(id: ProviderId): Provider { return PROVIDERS.find((p) => p.id === id) || PROVIDERS[0]; }
+interface Conf { pid: ProviderId; key: string; model: string; base: string }
+function usable(c: Conf): boolean { return c.pid === "custom" ? !!c.base && !!c.model : !!c.key && !!c.model; }
+/** Fournisseur, clé et modèle pour un usage : le réglage propre à l'usage s'il est complet, sinon l'IA principale. */
+export function conf(role?: AIRole): Conf {
   const ai = store.settings.ai;
-  if (ai.provider === "custom") return !!ai.customBase.trim() && !!currentModel();
-  return !!currentKey() && !!currentModel();
+  const mk = (pid: ProviderId, model?: string): Conf => ({ pid, key: (ai.keys[pid] || "").trim(), model: (model || ai.models[pid] || providerById(pid).defaultModel || "").trim(), base: ai.customBase.trim().replace(/\/+$/, "") });
+  const r = role ? ai.roles?.[role] : undefined;
+  if (r?.provider) { const c = mk(r.provider, r.model); if (usable(c)) return c; }
+  return mk(ai.provider);
 }
-export function aiName(): string { return provider().name; }
+export function provider(role?: AIRole): Provider { return providerById(conf(role).pid); }
+export function currentKey(role?: AIRole): string { return conf(role).key; }
+export function currentModel(role?: AIRole): string { return conf(role).model; }
+export function hasKey(role?: AIRole): boolean { return usable(conf(role)); }
+/** « anthropic/claude-haiku-5.5 » → « Claude Haiku 5.5 » */
+export function modelLabel(pid: ProviderId, model: string): string {
+  const sug = providerById(pid).suggested.find((m) => m.id === model);
+  if (sug) return sug.label.split(" · ")[0];
+  let m = model.split("/").pop() || model;
+  m = m.replace(/[-_:]\d{8}$/, "").replace(/:free$/, "").replace(/(\d)-(\d)/g, "$1.$2").replace(/[-_]/g, " ");
+  return m.replace(/\b([a-z])/g, (x) => x.toUpperCase()).replace(/\bGpt\b/, "GPT").trim() || providerById(pid).name;
+}
+export function aiName(role?: AIRole): string { const c = conf(role); return c.model ? modelLabel(c.pid, c.model) : providerById(c.pid).name; }
 
 export const SYSTEM = `Tu es le professeur de go de Tengen, une appli pour apprendre le go en français.
 Ton élève débute : il connaît les règles mais peu la stratégie. Tu expliques simplement, avec des mots concrets, sans jargon non expliqué.
@@ -58,8 +80,7 @@ export function lastMovesText(g: Game, k = 8): string {
   return mv.map((m, i) => `${g.moves.length - mv.length + i + 1}. ${m.col === BLACK ? "Noir" : "Blanc"} ${m.p === PASS ? "passe" : g.board.name(m.p)}`).join(", ");
 }
 
-function httpError(status: number, detail: string): AIError {
-  const p = provider().name;
+function httpError(status: number, detail: string, p = provider().name): AIError {
   if (status === 401 || status === 403) return new AIError("auth", `Clé refusée par ${p}, ou accès au modèle interdit. Vérifie la clé et le modèle dans Réglages. ${detail}`);
   if (status === 404) return new AIError("model", `Modèle introuvable chez ${p}. Choisis-en un autre dans Réglages.`);
   if (status === 402 || /credit|balance|quota|billing/i.test(detail)) return new AIError("credit", `Crédit épuisé ou quota atteint chez ${p}. ${detail}`);
@@ -84,7 +105,7 @@ async function readSSE(res: Response, onEvent: (data: string) => string | void, 
   } catch (e) { if (signal?.aborted || (e as Error).name === "AbortError") throw new AIError("cancelled", "Arrêté."); throw e; }
 }
 
-type AskOpts = { onText?: (t: string) => void; signal?: AbortSignal; maxTokens?: number; system?: string };
+type AskOpts = { onText?: (t: string) => void; signal?: AbortSignal; maxTokens?: number; system?: string; role?: AIRole };
 
 function partsText(c: unknown): string {
   if (typeof c === "string") return c;
@@ -94,7 +115,7 @@ function partsText(c: unknown): string {
 
 /** Un appel au fournisseur. `stream: false` sert de seconde chance quand le flux revient vide. */
 async function call(prompt: string, opts: AskOpts, stream: boolean, budget: number): Promise<{ text: string; finish: string; thought: boolean; err: string }> {
-  const ai = store.settings.ai, pid = ai.provider, key = currentKey(), model = currentModel();
+  const c = conf(opts.role), pid = c.pid, key = c.key, model = c.model, pname = providerById(pid).name;
   const system = opts.system ?? SYSTEM;
   let url = "", headers: Record<string, string> = { "content-type": "application/json" }, body: unknown;
   if (pid === "anthropic") {
@@ -107,7 +128,7 @@ async function call(prompt: string, opts: AskOpts, stream: boolean, budget: numb
     headers = { ...headers, "x-goog-api-key": key };
     body = { systemInstruction: { parts: [{ text: system }] }, contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: budget } };
   } else {
-    const base = pid === "openai" ? "https://api.openai.com/v1" : pid === "xai" ? "https://api.x.ai/v1" : pid === "openrouter" ? "https://openrouter.ai/api/v1" : ai.customBase.trim().replace(/\/+$/, "");
+    const base = pid === "openai" ? "https://api.openai.com/v1" : pid === "xai" ? "https://api.x.ai/v1" : pid === "openrouter" ? "https://openrouter.ai/api/v1" : c.base;
     url = base + "/chat/completions";
     if (key) headers.authorization = "Bearer " + key;
     const extra: Record<string, unknown> = pid === "openai" ? { max_completion_tokens: budget } : { max_tokens: budget };
@@ -122,9 +143,9 @@ async function call(prompt: string, opts: AskOpts, stream: boolean, budget: numb
   try { res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal: opts.signal }); }
   catch (e) {
     if ((e as Error).name === "AbortError") throw new AIError("cancelled", "Arrêté.");
-    throw new AIError("network", `Impossible de joindre ${provider().name}. Vérifie ta connexion${pid === "custom" ? ", l'adresse du service et qu'il accepte les appels depuis un navigateur (CORS)" : ""}.`);
+    throw new AIError("network", `Impossible de joindre ${pname}. Vérifie ta connexion${pid === "custom" ? ", l'adresse du service et qu'il accepte les appels depuis un navigateur (CORS)" : ""}.`);
   }
-  if (!res.ok) { let d = ""; try { const j = await res.json(); d = j?.error?.message || j?.message || ""; } catch { /* */ } throw httpError(res.status, d); }
+  if (!res.ok) { let d = ""; try { const j = await res.json(); d = j?.error?.message || j?.message || ""; } catch { /* */ } throw httpError(res.status, d, pname); }
 
   let text = "", finish = "", thought = false, err = "";
   const take = (ev: any, whole: boolean) => {
@@ -170,8 +191,8 @@ async function call(prompt: string, opts: AskOpts, stream: boolean, budget: numb
 }
 
 export async function ask(prompt: string, opts: AskOpts = {}): Promise<string> {
-  if (!hasKey()) throw new AIError("no_key", "Choisis une IA et ajoute ta clé dans Réglages.");
-  const pid = store.settings.ai.provider, model = currentModel();
+  if (!hasKey(opts.role)) throw new AIError("no_key", "Choisis une IA et ajoute ta clé dans Réglages.");
+  const cf = conf(opts.role), pid = cf.pid, model = cf.model;
   const want = opts.maxTokens ?? 800;
   // Marge confortable : beaucoup de modèles récents « réfléchissent » avant de répondre et ces jetons comptent dans le budget.
   const budget = pid === "anthropic" ? want : Math.max(want * 4, 4000);
@@ -199,7 +220,7 @@ export async function ask(prompt: string, opts: AskOpts = {}): Promise<string> {
   if (r.text.trim()) return r.text;
   const err = r.err || first.err, thought = r.thought || first.thought, finish = r.finish || first.finish;
   const name = `« ${model} »`;
-  if (err) throw new AIError("stream", `${provider().name} a renvoyé une erreur pour ${name} : ${err}`);
+  if (err) throw new AIError("stream", `${providerById(pid).name} a renvoyé une erreur pour ${name} : ${err}`);
   if (thought || /length|max_tokens|MAX_TOKENS/i.test(finish))
     throw new AIError("empty", `Le modèle ${name} a passé tout son temps à réfléchir sans écrire de réponse. Choisis un modèle sans « raisonnement » dans Réglages (par ex. une version « mini », « flash » ou « haiku »).`);
   if (/content_filter|SAFETY|RECITATION|refusal/i.test(finish))
@@ -231,7 +252,7 @@ export async function listModels(pid: ProviderId, key: string, customBase = ""):
   }
 }
 
-export async function testAI(): Promise<string> { return ask("Réponds seulement : « Prêt pour la leçon ! »", { maxTokens: 200 }); }
+export async function testAI(role?: AIRole): Promise<string> { return ask("Réponds seulement : « Prêt pour la leçon ! »", { maxTokens: 200, role }); }
 
 export function extractJson<T>(t: string): T | null {
   const a = t.indexOf("{"), b = t.lastIndexOf("}");

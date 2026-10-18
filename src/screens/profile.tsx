@@ -6,7 +6,7 @@ import { PROBLEMS } from "../content/problems";
 import { LEVELS, kyuLabel } from "../engine/levels";
 import { engine, MODEL_URL, MODEL_MB } from "../engine/client";
 import { useKata, KataCard } from "./play";
-import { PROVIDERS, ProviderId, listModels, testAI } from "../coach/ai";
+import { PROVIDERS, ProviderId, listModels, testAI, ROLES, AIRole, aiName, providerById } from "../coach/ai";
 import { fromSgf } from "../go/sgf";
 
 export function ProfileScreen() {
@@ -212,6 +212,55 @@ function AISettings() {
         {ai.keys[ai.provider] && <button class="btn small danger" onClick={() => { setKey(""); store.setSettings({ ai: { ...store.settings.ai, keys: { ...store.settings.ai.keys, [ai.provider]: "" } } }); toast("Clé supprimée"); }}>Supprimer la clé</button>}
       </div>
       {msg && <div class={"fb " + (msg.ok ? "info" : "ko")}>{msg.text}</div>}
+      <RoleSettings />
     </>
+  );
+}
+
+/** Un modèle par usage : jouer, conseils, bilan. Par défaut, tout passe par l'IA principale. */
+function RoleSettings() {
+  const s = useStore();
+  const ai = s.settings.ai, roles = ai.roles || {};
+  const ready = PROVIDERS.filter((p) => (p.id === "custom" ? !!ai.customBase.trim() : !!(ai.keys[p.id] || "").trim()));
+  const [msg, setMsg] = useState<Record<string, { ok: boolean; text: string }>>({});
+  const set = (r: AIRole, v: { provider: ProviderId; model: string } | null) => {
+    const n = { ...(store.settings.ai.roles || {}) };
+    if (v) n[r] = v; else delete n[r];
+    store.setSettings({ ai: { ...store.settings.ai, roles: n } });
+  };
+  return (
+    <details class="card stack" style="gap:10px" open={Object.keys(roles).length > 0}>
+      <summary style="font-weight:700;cursor:pointer">Un modèle différent selon l'usage</summary>
+      <p class="small muted">Facultatif. Par exemple un modèle rapide et économique pour jouer, et un modèle plus fin pour le bilan des parties. Seuls les fournisseurs dont la clé est enregistrée ci-dessus sont proposés.</p>
+      {ROLES.map((r) => {
+        const cur = roles[r.id];
+        const pv = cur ? providerById(cur.provider) : null;
+        return (
+          <div key={r.id} class="stack" style="gap:6px;border-top:1px solid var(--line);padding-top:10px">
+            <b>{r.label}</b>
+            <span class="small muted">{r.hint}</span>
+            <select aria-label={"Fournisseur pour : " + r.label} value={cur?.provider || ""} onChange={(e) => {
+              const v = (e.target as HTMLSelectElement).value as ProviderId | "";
+              if (!v) set(r.id, null); else { const p = providerById(v); set(r.id, { provider: v, model: ai.models[v] || p.defaultModel || "" }); }
+              setMsg({ ...msg, [r.id]: undefined as never });
+            }}>
+              <option value="">Comme l'IA principale</option>
+              {ready.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+            {cur && pv && (
+              <>
+                {pv.suggested.length > 0 && <div class="row" style="gap:6px">{pv.suggested.map((m) => <button key={m.id} class={"chip" + (cur.model === m.id ? " accent" : "")} style="border:0;min-height:34px;font-size:13px" onClick={() => set(r.id, { ...cur, model: m.id })}>{m.label}</button>)}</div>}
+                <input type="text" aria-label={"Modèle pour : " + r.label} autocomplete="off" spellcheck={false} placeholder="nom exact du modèle" value={cur.model} onInput={(e) => set(r.id, { ...cur, model: (e.target as HTMLInputElement).value.trim() })} />
+              </>
+            )}
+            <div class="row" style="align-items:center">
+              <span class="small">Utilisé : <b>{aiName(r.id)}</b></span>
+              <button class="btn small" onClick={async () => { setMsg({ ...msg, [r.id]: { ok: true, text: "Test en cours…" } }); try { const t = await testAI(r.id); setMsg((m) => ({ ...m, [r.id]: { ok: true, text: aiName(r.id) + " répond : " + t } })); } catch (e) { setMsg((m) => ({ ...m, [r.id]: { ok: false, text: (e as Error).message } })); } }}>Tester</button>
+            </div>
+            {msg[r.id] && <div class={"fb small " + (msg[r.id].ok ? "info" : "ko")}>{msg[r.id].text}</div>}
+          </div>
+        );
+      })}
+    </details>
   );
 }

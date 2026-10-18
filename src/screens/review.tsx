@@ -141,7 +141,7 @@ function ReviewInner({ sg }: { sg: SavedGame }) {
     const sb = summary(stats, BLACK, total), sw = summary(stats, WHITE, total);
     const who = human ? `L'élève joue ${human === BLACK ? "Noir" : "Blanc"}.` : "Partie entre deux joueurs.";
     const prompt = `Voici l'analyse par KataGo d'une partie de go ${n}×${n} (komi ${fr(data.komi)}). ${who} Résultat : ${sg.result || "non terminé"}.\n\nStatistiques (perte moyenne en points par coup, précision = coups à moins d'un point du meilleur) :\n- Noir : précision ${sb.accuracy} %, perte moyenne ${fr(sb.avgLoss)}, ${sb.gaffes} gaffes, ${sb.erreurs} erreurs ; par phase (ouverture/milieu/fin) : ${sb.phases.map((x) => fr(x)).join(" / ")}.\n- Blanc : précision ${sw.accuracy} %, perte moyenne ${fr(sw.avgLoss)}, ${sw.gaffes} gaffes, ${sw.erreurs} erreurs ; par phase : ${sw.phases.map((x) => fr(x)).join(" / ")}.\n\nMoments clés :\n${lines || "aucune erreur notable"}\n\nPosition finale :\n${boardText(fromData(data))}\n\nRédige un bilan pédagogique pour l'élève : 1) ce qui a décidé la partie, 2) ses trois principaux axes de progrès avec des exemples précis de la partie, 3) un exercice ou une leçon à travailler. 12 phrases maximum, texte simple.`;
-    try { await ask(prompt, { maxTokens: 1200, onText: (t) => setReport({ text: t, busy: true }) }); setReport((r) => (r ? { ...r, busy: false } : r)); }
+    try { await ask(prompt, { maxTokens: 1200, role: "review", onText: (t) => setReport({ text: t, busy: true }) }); setReport((r) => (r ? { ...r, busy: false } : r)); }
     catch (e) { setReport((r) => ({ text: (r?.text ? r.text + "\n\n" : "") + (e as Error).message, busy: false })); }
   }
 
@@ -229,8 +229,8 @@ function ReviewInner({ sg }: { sg: SavedGame }) {
               })}
             </div>
             <div class="card stack" style="gap:8px">
-              <b>Bilan de la partie par {hasKey() ? aiName() : "l'IA"}</b>
-              {!hasKey() ? <p class="small muted">Ajoute une IA dans <a href="#/reglages">Réglages</a> pour obtenir un bilan rédigé : ce qui a décidé la partie et tes axes de progrès.</p>
+              <b>Bilan de la partie par {hasKey("review") ? aiName("review") : "l'IA"}</b>
+              {!hasKey("review") ? <p class="small muted">Ajoute une IA dans <a href="#/reglages">Réglages</a> pour obtenir un bilan rédigé : ce qui a décidé la partie et tes axes de progrès.</p>
                 : report ? <div class="bubble"><span class="av">IA</span><span class={"tx" + (report.busy && !report.text ? " thinking" : "")}>{report.text || "Rédaction du bilan"}</span></div>
                 : <button class="btn primary small" onClick={aiReport}>Rédiger le bilan</button>}
             </div>
